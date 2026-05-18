@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate Cut icons</title>
+  <style>
+    body { font-family: sans-serif; padding: 24px; background: #111; color: #eee; }
+    canvas { display: block; margin: 12px 0; border-radius: 8px; }
+    a { display: inline-block; margin: 4px 8px 4px 0; padding: 8px 16px; background: #4ade80; color: #000; border-radius: 6px; text-decoration: none; font-weight: 600; }
+    p { margin-bottom: 16px; color: #888; }
+  </style>
+</head>
+<body>
+  <h2>Cut — icon generator</h2>
+  <p>Click the download links, then move the files into the <code>icons/</code> folder next to index.html.</p>
+  <div id="out"></div>
+  <script>
+    function draw(size) {
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      const cx = size / 2, cy = size / 2, r = size / 2;
+
+      // Background
+      ctx.fillStyle = '#0f0f0f';
+      ctx.beginPath();
+      ctx.roundRect(0, 0, size, size, size * 0.2);
+      ctx.fill();
+
+      // Outer ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.78, 0, Math.PI * 2);
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = size * 0.05;
+      ctx.stroke();
+
+      // Letter C
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.4, Math.PI * 0.4, Math.PI * 1.6);
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = size * 0.11;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      return c;
+    }
+
+    const out = document.getElementById('out');
+    [192, 512].forEach(size => {
+      const canvas = draw(size);
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `icon-${size}.png`;
+      a.textContent = `Download icon-${size}.png`;
+      out.appendChild(canvas);
+      out.appendChild(a);
+      out.appendChild(document.createElement('br'));
+    });
+  </script>
+</body>
+</html>
