@@ -43,6 +43,13 @@ function formatDate(dateStr) {
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
+function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + n);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 // ── DATA LOGIC ────────────────────────────────────────────────────────────────
 
 function getOrCreateDay(dateStr, days) {
@@ -130,7 +137,7 @@ function mealFormHTML(meal) {
 // ── TODAY TAB ─────────────────────────────────────────────────────────────────
 
 function renderToday() {
-  const dateStr = todayStr();
+  const dateStr = selectedDate;
   const { day, metrics, inherited, inheritedFrom, totals, proteinGoal, calRem, protRem, inDeficit } = dayStatus(dateStr);
   const settings = loadSettings();
 
@@ -224,10 +231,17 @@ function renderToday() {
       <textarea class="input note-input" id="day-note" placeholder="Reflection, context, anything...">${day.note || ''}</textarea>
     </div>`;
 
+  const isToday = dateStr === todayStr();
+  const dateLabel = isToday ? 'Today' : formatDate(dateStr);
+
   document.getElementById('tab-today').innerHTML = `
     <div class="tab-header">
       <h1>Cut</h1>
-      <span class="tab-sub">${formatDate(dateStr)}</span>
+      <div class="date-nav">
+        <button class="btn-icon" id="btn-prev-day">‹</button>
+        <span class="tab-sub">${dateLabel}</span>
+        <button class="btn-icon" id="btn-next-day" ${isToday ? 'disabled' : ''}>›</button>
+      </div>
     </div>
     <div class="tab-body">
       ${metricsCard}
@@ -237,6 +251,13 @@ function renderToday() {
     </div>`;
 
   // Events
+  document.getElementById('btn-prev-day').addEventListener('click', () => {
+    selectedDate = addDays(selectedDate, -1);
+    renderToday();
+  });
+  document.getElementById('btn-next-day').addEventListener('click', () => {
+    if (selectedDate < todayStr()) { selectedDate = addDays(selectedDate, 1); renderToday(); }
+  });
   document.getElementById('btn-metrics')?.addEventListener('click', openMetricsModal);
   document.getElementById('btn-add-meal')?.addEventListener('click', toggleAddMealForm);
   document.getElementById('day-note')?.addEventListener('change', e => {
@@ -307,7 +328,7 @@ function saveMeal(id, container) {
   const cal = parseFloat(container.querySelector('[data-field="cal"]').value) || 0;
   const protein = parseFloat(container.querySelector('[data-field="protein"]').value) || 0;
 
-  const dateStr = todayStr();
+  const dateStr = selectedDate;
   const days = loadDays();
   const day = getOrCreateDay(dateStr, days);
 
@@ -323,7 +344,7 @@ function saveMeal(id, container) {
 }
 
 function deleteMeal(id) {
-  const dateStr = todayStr();
+  const dateStr = selectedDate;
   const days = loadDays();
   const day = getOrCreateDay(dateStr, days);
   day.meals = day.meals.filter(m => m.id !== id);
@@ -332,7 +353,7 @@ function deleteMeal(id) {
 }
 
 function openMetricsModal() {
-  const dateStr = todayStr();
+  const dateStr = selectedDate;
   const { metrics } = dayStatus(dateStr);
   const settings = loadSettings();
   const unit = unitLabel(settings.unit);
@@ -686,6 +707,7 @@ function download(filename, content, type) {
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
 
 let currentTab = 'today';
+let selectedDate = todayStr();
 
 function navigate(tab) {
   currentTab = tab;
@@ -694,7 +716,7 @@ function navigate(tab) {
   document.getElementById(`tab-${tab}`).classList.add('active');
   document.querySelector(`.nav-btn[data-tab="${tab}"]`)?.classList.add('active');
 
-  if (tab === 'today')    renderToday();
+  if (tab === 'today')    { selectedDate = todayStr(); renderToday(); }
   if (tab === 'history')  renderHistory();
   if (tab === 'trends')   renderTrends();
   if (tab === 'settings') renderSettings();
