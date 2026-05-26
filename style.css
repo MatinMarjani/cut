@@ -111,8 +111,10 @@ html, body {
   border-radius: 8px;
   margin-top: 6px;
 }
-.status-good { background: rgba(74,222,128,.12); color: var(--accent); }
-.status-bad  { background: rgba(248,113,113,.12); color: var(--danger); }
+.status-good  { background: rgba(74,222,128,.12);  color: var(--accent); }
+.status-bad   { background: rgba(248,113,113,.12); color: var(--danger); }
+.status-cheat { background: rgba(251,146,60,.12);  color: #fb923c; }
+.status-skip  { background: rgba(120,120,120,.12); color: var(--muted); }
 
 /* ── MEALS ── */
 .meal-row {
@@ -334,7 +336,10 @@ input[type=number].input::-webkit-inner-spin-button { -webkit-appearance: none; 
   font-size: 14px;
   cursor: pointer;
 }
-.toggle-btn.active { border-color: var(--accent); color: var(--accent); }
+.toggle-btn.active       { border-color: var(--accent); color: var(--accent); }
+.toggle-btn.active.cheat { border-color: #fb923c;      color: #fb923c; }
+.h-status.cheat { color: #fb923c; }
+.stat-value.cheat { color: #fb923c; }
 .data-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .danger-zone .btn-secondary { color: var(--danger); border-color: var(--danger); }
 

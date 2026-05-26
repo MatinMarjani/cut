@@ -97,6 +97,25 @@ function dayStatus(dateStr) {
   const proteinGoal = metrics ? metrics.weight_kg * settings.protein_multiplier : null;
   const calRem = metrics !== null ? metrics.bmr - totals.cal : null;
   const protRem = proteinGoal !== null ? proteinGoal - totals.protein : null;
+  const status = day.status || 'auto'; // 'auto' | 'skip' | 'cheat'
+  const hasMeals = (day.meals || []).length > 0;
+
+  // dayType drives streak, history badges, and trends
+  // 'deficit' | 'over' | 'cheat' | 'skip'
+  let dayType;
+  if (status === 'cheat') {
+    dayType = 'cheat';
+  } else if (status === 'skip') {
+    dayType = 'skip';
+  } else if (!hasMeals) {
+    dayType = 'skip'; // no meals logged = no data, treat as neutral
+  } else if (calRem !== null && calRem >= 0) {
+    dayType = 'deficit';
+  } else if (calRem !== null) {
+    dayType = 'over';
+  } else {
+    dayType = 'skip';
+  }
 
   return {
     day,
@@ -107,7 +126,9 @@ function dayStatus(dateStr) {
     proteinGoal,
     calRem,
     protRem,
-    inDeficit: calRem !== null ? calRem >= 0 : null,
+    status,
+    dayType,
+    inDeficit: dayType === 'deficit',
   };
 }
 
@@ -138,7 +159,7 @@ function mealFormHTML(meal) {
 
 function renderToday() {
   const dateStr = selectedDate;
-  const { day, metrics, inherited, inheritedFrom, totals, proteinGoal, calRem, protRem, inDeficit } = dayStatus(dateStr);
+  const { day, metrics, inherited, inheritedFrom, totals, proteinGoal, calRem, protRem, inDeficit, dayType, status } = dayStatus(dateStr);
   const settings = loadSettings();
 
   // Metrics card
@@ -210,6 +231,35 @@ function renderToday() {
       </div>`;
   }
 
+  // Override progress card when status is manually set
+  if (status === 'cheat') {
+    progressCard = `
+      <div class="card">
+        <div class="status-badge status-cheat">✕ Cheat day — marked as lost</div>
+      </div>`;
+  } else if (status === 'skip') {
+    progressCard = `
+      <div class="card">
+        <div class="status-badge status-skip">— Skipped / untracked</div>
+      </div>`;
+  }
+
+  // Day status toggle — always visible
+  const statusToggle = `
+    <div class="card">
+      <div class="card-title">Day status</div>
+      <div class="toggle-group">
+        <button class="toggle-btn ${status === 'auto'  ? 'active' : ''}" data-status="auto">Auto</button>
+        <button class="toggle-btn ${status === 'skip'  ? 'active' : ''}" data-status="skip">— Skip</button>
+        <button class="toggle-btn ${status === 'cheat' ? 'active cheat' : ''}" data-status="cheat">✕ Cheat</button>
+      </div>
+      <p class="muted" style="margin-top:8px">${
+        status === 'skip'  ? 'Day excluded from streak and adherence.' :
+        status === 'cheat' ? 'Marked as lost. Breaks streak.' :
+                             'Status calculated from your meals.'
+      }</p>
+    </div>`;
+
   // Meals card
   const meals = day.meals || [];
   const mealsCard = `
@@ -247,6 +297,7 @@ function renderToday() {
       ${metricsCard}
       ${progressCard}
       ${mealsCard}
+      ${statusToggle}
       ${noteCard}
     </div>`;
 
@@ -270,6 +321,14 @@ function renderToday() {
     b.addEventListener('click', () => toggleInlineEdit(b.dataset.id)));
   document.querySelectorAll('.meal-del-btn').forEach(b =>
     b.addEventListener('click', () => deleteMeal(b.dataset.id)));
+  document.querySelectorAll('[data-status]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const days = loadDays();
+      const day = getOrCreateDay(dateStr, days);
+      day.status = btn.dataset.status;
+      saveDay(dateStr, day);
+      renderToday();
+    }));
 }
 
 function mealRowHTML(m) {
@@ -413,9 +472,10 @@ function renderHistory() {
   }
 
   const rows = keys.map(dateStr => {
-    const { day, metrics, totals, proteinGoal, inDeficit, inherited } = dayStatus(dateStr);
-    const statusIcon = inDeficit === null ? '–' : inDeficit ? '✓' : '✕';
-    const statusCls  = inDeficit === null ? '' : inDeficit ? 'good' : 'bad';
+    const { day, metrics, totals, dayType, inherited } = dayStatus(dateStr);
+    const statusIcon = { deficit: '✓', over: '✕', cheat: '✕', skip: '—' }[dayType] ?? '—';
+    const statusCls  = { deficit: 'good', over: 'bad', cheat: 'cheat', skip: '' }[dayType] ?? '';
+    const statusLabel = dayType === 'cheat' ? ' Cheat' : '';
     const wText = metrics ? `${kgToDisplay(metrics.weight_kg, settings.unit)} ${unitLabel(settings.unit)}` : '–';
 
     return `
@@ -425,7 +485,7 @@ function renderHistory() {
           <div class="history-summary">
             <span>${totals.cal} kcal</span>
             <span>${totals.protein.toFixed(0)}g</span>
-            <span class="h-status ${statusCls}">${statusIcon}</span>
+            <span class="h-status ${statusCls}">${statusIcon}${statusLabel}</span>
           </div>
         </div>
         <div class="history-detail" id="hd-${dateStr}" style="display:none">
@@ -471,18 +531,25 @@ function renderTrends() {
   const statuses = allKeys.map(d => ({ dateStr: d, ...dayStatus(d) }));
   const recent = statuses.slice(-30);
 
-  // Stats
-  const deficitCount = recent.filter(d => d.inDeficit === true).length;
-  const adherencePct = Math.round((deficitCount / recent.length) * 100);
-  const avgCal = Math.round(recent.reduce((s, d) => s + d.totals.cal, 0) / recent.length);
+  // Stats — skip days excluded from counted days
+  const counted   = recent.filter(d => d.dayType !== 'skip');
+  const deficitCount = counted.filter(d => d.dayType === 'deficit').length;
+  const overCount    = counted.filter(d => d.dayType === 'over').length;
+  const cheatCount   = counted.filter(d => d.dayType === 'cheat').length;
+  const adherencePct = counted.length > 0 ? Math.round((deficitCount / counted.length) * 100) : 0;
+  const avgCal = counted.length > 0
+    ? Math.round(counted.reduce((s, d) => s + d.totals.cal, 0) / counted.length)
+    : 0;
   const avgBMR = Math.round(recent.filter(d => d.metrics).reduce((s, d) => s + d.metrics.bmr, 0) /
     (recent.filter(d => d.metrics).length || 1));
 
-  // Deficit streak (from most recent backward)
+  // Deficit streak — skip days are transparent (don't break or extend)
   let streak = 0;
   for (let i = statuses.length - 1; i >= 0; i--) {
-    if (statuses[i].inDeficit === true) streak++;
-    else break;
+    const t = statuses[i].dayType;
+    if (t === 'skip') continue;       // neutral — look further back
+    if (t === 'deficit') { streak++; continue; }
+    break;                            // 'over' or 'cheat' — streak ends
   }
 
   // Weight chart — only days with actual (non-inherited) measurements
@@ -503,19 +570,37 @@ function renderTrends() {
       <div class="stats-grid">
         <div class="stat-card">
           <span class="stat-value ${adherencePct >= 70 ? 'good' : 'bad'}">${adherencePct}%</span>
-          <span class="stat-label">deficit days (last ${recent.length})</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value">${avgCal}</span>
-          <span class="stat-label">avg kcal/day</span>
+          <span class="stat-label">deficit rate (${counted.length} tracked days)</span>
         </div>
         <div class="stat-card">
           <span class="stat-value ${streak > 0 ? 'good' : ''}">${streak}</span>
           <span class="stat-label">deficit streak</span>
         </div>
         <div class="stat-card">
+          <span class="stat-value">${avgCal}</span>
+          <span class="stat-label">avg kcal/day</span>
+        </div>
+        <div class="stat-card">
           <span class="stat-value ${avgCal <= avgBMR ? 'good' : 'bad'}">${avgBMR > 0 ? (avgCal <= avgBMR ? '-' : '+') + Math.abs(avgBMR - avgCal) : '–'}</span>
           <span class="stat-label">avg daily delta kcal</span>
+        </div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-value good">${deficitCount}</span>
+          <span class="stat-label">deficit days</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value bad">${overCount}</span>
+          <span class="stat-label">over BMR days</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value cheat">${cheatCount}</span>
+          <span class="stat-label">cheat days</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value">${recent.length - counted.length}</span>
+          <span class="stat-label">skipped days</span>
         </div>
       </div>
 
