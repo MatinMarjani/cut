@@ -697,11 +697,21 @@ function renderHistory() {
         <div class="history-detail" id="hd-${dateStr}" style="display:none">
           ${metrics ? `<div class="metrics-mini">${wText} · BMR ${metrics.bmr} kcal · BF ${metrics.bf_pct}%</div>` : ''}
           ${(day.meals || []).length > 0
-            ? `<div>${day.meals.map(m => `
-                <div class="h-meal-row">
-                  <span>${escHtml(m.name || 'Unnamed')}</span>
-                  <span>${m.protein}g · ${m.cal} kcal</span>
-                </div>`).join('')}</div>`
+            ? `<div>${day.meals.map(m => {
+                const t = itemTotals(m);
+                const subItems = m.items && m.items.length > 1
+                  ? m.items.map(it => `
+                      <div class="h-meal-row" style="padding-left:10px;opacity:0.7">
+                        <span>${escHtml(it.name || '–')}${it.qty ? ` <span style="font-size:11px">(${it.qty}${it.unit||'g'})</span>` : ''}</span>
+                        <span>${it.protein}g · ${it.cal} kcal</span>
+                      </div>`).join('')
+                  : '';
+                return `
+                  <div class="h-meal-row">
+                    <span>${escHtml(m.name || 'Unnamed')}</span>
+                    <span>${t.protein}g · ${t.cal} kcal</span>
+                  </div>${subItems}`;
+              }).join('')}</div>`
             : '<p class="muted">No meals logged.</p>'}
           ${day.note ? `<p class="h-note">"${escHtml(day.note)}"</p>` : ''}
         </div>
