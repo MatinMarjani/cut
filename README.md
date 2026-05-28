@@ -8,42 +8,87 @@ Eat below your BMR. Log meals, track your deficit, watch your weight trend down.
 
 ## Features
 
-- **Log meals** — name, calories, protein per meal; editable at any time
-- **Daily metrics** — weight, BMR, body fat %; inherited from the last recorded day if you skip the scale
-- **Progress bars** — calories vs BMR, protein vs goal; shows remaining or overage
-- **Deficit status** — clear indicator if you're under or over BMR for the day
-- **Protein goal** — based on bodyweight × a configurable multiplier (g/kg)
-- **History** — tap any past day to see its meals, metrics, and note
-- **Trends** — weight over time, daily calories vs BMR, deficit streak, adherence %
-- **Daily note** — one-line reflection per day
-- **Export / Import** — JSON backup and CSV export for spreadsheets
-- **Unit toggle** — kg or lbs, converted on display and input
-- **Offline** — works with no internet after first load
+### Daily logging
+- **Day navigation** — tap ‹ › in the Today tab to log meals for past days (e.g. adding dinner after midnight)
+- **Meals with ingredients** — a meal can have multiple items; each item is either picked from your food library or entered manually
+- **Food library** — define foods once with their macro profile (per 100g or per serving); the app calculates calories and protein when you enter the weight or quantity
+- **Daily metrics** — weight, BMR, body fat %; if you skip the scale, the last recorded values carry forward automatically
+- **Daily note** — one line of context per day (skipped gym, ate out, etc.)
+
+### Progress and status
+- **Progress bars** — calories eaten vs BMR, protein vs goal; shows headroom or overage
+- **Protein goal** — bodyweight × a configurable multiplier (g/kg), set in Settings
+- **Day status** — three states you can set manually:
+  - *Auto* — calculated from your logged meals (green ✓ if under BMR, red ✕ if over)
+  - *Skip* — untracked day, excluded from streak and adherence stats
+  - *Cheat* — known bad day, breaks streak; no meal entry required
+
+### History and trends
+- **History** — tap any past day to see its meals (with per-ingredient breakdown), metrics, and note
+- **Trends** — weight chart, daily calories vs BMR chart, deficit streak, adherence rate, and a breakdown of deficit / over-BMR / cheat / skipped days
+
+### Data
+- **Export JSON** — full backup including days, settings, and food library
+- **Import JSON** — restore from a backup (merges all data)
+- **Export CSV** — one row per meal item, for analysis in Excel or Google Sheets
+- **Unit toggle** — kg or lbs, converted on display and input; food quantities always in grams
+
+---
 
 ## Install on your phone
 
 ### Android
 1. Open the app URL in Chrome
-2. Tap the banner or Chrome menu → **"Add to Home Screen"**
-3. Done — launches like a native app
+2. Tap the install banner or Chrome menu → **"Add to Home Screen"**
+3. Done — launches as a standalone app, works offline
 
 ### iOS
 1. Open the app URL in Safari
 2. Tap the Share button → **"Add to Home Screen"**
 3. Done
 
-> **iOS note:** Safari may clear app data if the app is unused for 7 days. Export a backup regularly.
+> **iOS note:** Safari may clear app data if the app is unused for 7 days. Export a JSON backup regularly.
+
+---
+
+## Data storage
+
+All data lives in `localStorage` on the device. Nothing is sent to any server.
+
+| Key | Contents |
+|-----|----------|
+| `cut_days` | All logged days — meals (with items), metrics, notes, day status |
+| `cut_settings` | Protein multiplier, weight unit preference |
+| `cut_foods` | Food library entries |
+
+### Meal data format
+
+Meals support two formats, both handled transparently:
+
+- **New format** — a meal has an `items` array; each item stores a snapshot of cal/protein at the time of logging, so editing a food in the library never changes past records
+- **Legacy format** — flat `cal` + `protein` fields; renders and edits correctly without any migration
+
+### Backup and restore
+
+**Settings → Export JSON** downloads a timestamped backup file containing all three storage keys. **Import JSON** restores everything. Store the file in cloud storage or email it to yourself — this is the only way to move data between devices.
+
+### Updating the app
+
+Push new code to GitHub → Pages redeploys automatically → the service worker on your phone picks up the update next time the app is open with internet. Bump the cache version in `sw.js` (`cut-v4` → `cut-v5`) with each push so the phone discards the old cache.
+
+Your data is never affected by app updates.
+
+---
 
 ## Develop locally
 
-No build tools or dependencies. Just a static server to satisfy service worker requirements.
+No build tools or dependencies — just a static server (service workers require HTTPS or localhost).
 
-**VS Code** — install the [Live Server](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer) extension, right-click `index.html` → "Open with Live Server".
+**VS Code** — install [Live Server](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer), right-click `index.html` → "Open with Live Server".
 
 **Python:**
 ```bash
 python -m http.server 8080
-# open http://localhost:8080
 ```
 
 **Node:**
@@ -55,30 +100,17 @@ npx serve .
 
 Open `create-icons.html` in any browser, download both PNGs, place them in `icons/`.
 
-## Data
-
-All data is stored in `localStorage` on the device — nothing is sent anywhere.
-
-| Key | Contents |
-|-----|----------|
-| `cut_days` | All logged days (meals, metrics, notes) |
-| `cut_settings` | Protein multiplier, unit preference |
-
-### Backup and restore
-
-Use **Settings → Export JSON** to download a full backup. **Import JSON** restores it. The JSON file is plain text — you can inspect it, email it to yourself, or store it in cloud storage.
-
-CSV export (one row per meal) is available for analysis in Excel or Google Sheets.
-
-### Updating the app
-
-Pushing new code to GitHub updates the hosted files. The service worker on your phone picks up the update automatically the next time you open the app with an internet connection. Your data is not affected by updates.
+---
 
 ## Stack
 
 Plain HTML, CSS, and JavaScript — no framework, no build step, no dependencies.
 
-- `manifest.json` — PWA metadata (name, icons, display mode)
-- `sw.js` — service worker for offline caching (cache-first strategy)
-- `app.js` — all application logic
-- `style.css` — dark-theme mobile-first styles
+| File | Purpose |
+|------|---------|
+| `index.html` | App shell — four tabs, bottom nav |
+| `app.js` | All logic — storage, rendering, modals, export |
+| `style.css` | Dark-theme mobile-first styles |
+| `manifest.json` | PWA metadata — name, icons, display mode |
+| `sw.js` | Service worker — cache-first offline strategy |
+| `create-icons.html` | Generates 192×512 PNG icons via canvas |
