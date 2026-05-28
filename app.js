@@ -25,6 +25,12 @@ function saveSettings(s) {
   localStorage.setItem('cut_settings', JSON.stringify(s));
 }
 
+function loadFoods() {
+  try { return JSON.parse(localStorage.getItem('cut_foods') || '[]'); }
+  catch { return []; }
+}
+function saveFoods(foods) { localStorage.setItem('cut_foods', JSON.stringify(foods)); }
+
 // ── DATE UTILS ────────────────────────────────────────────────────────────────
 
 function todayStr() {
@@ -69,10 +75,10 @@ function resolveMetrics(dateStr, days) {
 }
 
 function mealTotals(meals) {
-  return (meals || []).reduce(
-    (acc, m) => ({ cal: acc.cal + (m.cal || 0), protein: acc.protein + (m.protein || 0) }),
-    { cal: 0, protein: 0 }
-  );
+  return (meals || []).reduce((acc, m) => {
+    const t = itemTotals(m);
+    return { cal: acc.cal + t.cal, protein: acc.protein + t.protein };
+  }, { cal: 0, protein: 0 });
 }
 
 // Unit helpers
@@ -84,6 +90,38 @@ function inputToKg(val, unit) {
   return unit === 'lbs' ? v / 2.20462 : v;
 }
 function unitLabel(unit) { return unit === 'lbs' ? 'lbs' : 'kg'; }
+
+// Macros for a food + qty (snapshots — not re-read from library later)
+function calcFoodMacros(food, qty) {
+  const q = parseFloat(qty) || 0;
+  if (food.type === 'serving') {
+    return { cal: Math.round(food.cal * q), protein: +((food.protein * q).toFixed(1)) };
+  }
+  return { cal: Math.round(food.cal * q / 100), protein: +((food.protein * q / 100).toFixed(1)) };
+}
+
+// Per-meal totals — handles both new (items[]) and legacy (flat cal/protein) formats
+function itemTotals(meal) {
+  if (meal.items && meal.items.length > 0) {
+    return meal.items.reduce(
+      (acc, it) => ({ cal: acc.cal + (it.cal || 0), protein: acc.protein + (it.protein || 0) }),
+      { cal: 0, protein: 0 }
+    );
+  }
+  return { cal: meal.cal || 0, protein: meal.protein || 0 };
+}
+
+// Auto-name for a meal if left blank
+function resolveMealName(meal) {
+  if (meal.name && meal.name.trim()) return meal.name.trim();
+  if (meal.items && meal.items.length === 1) return meal.items[0].name || 'Meal';
+  return 'Meal';
+}
+
+// Wrap a legacy flat meal as a single item for editing in the new modal
+function legacyToSingleItem(meal) {
+  return { name: meal.name || '', cal: meal.cal || 0, protein: meal.protein || 0 };
+}
 
 // Full computed status for a given day
 function dayStatus(dateStr) {
@@ -268,7 +306,6 @@ function renderToday() {
         <span class="card-title">Meals</span>
         <button class="btn-add" id="btn-add-meal">+ Add</button>
       </div>
-      <div id="add-meal-form"></div>
       <div id="meals-list">
         ${meals.length === 0 ? '<p class="muted">No meals logged yet.</p>' : meals.map(mealRowHTML).join('')}
       </div>
@@ -310,7 +347,7 @@ function renderToday() {
     if (selectedDate < todayStr()) { selectedDate = addDays(selectedDate, 1); renderToday(); }
   });
   document.getElementById('btn-metrics')?.addEventListener('click', openMetricsModal);
-  document.getElementById('btn-add-meal')?.addEventListener('click', toggleAddMealForm);
+  document.getElementById('btn-add-meal')?.addEventListener('click', () => openMealModal(dateStr));
   document.getElementById('day-note')?.addEventListener('change', e => {
     const days = loadDays();
     const day = getOrCreateDay(dateStr, days);
@@ -318,7 +355,17 @@ function renderToday() {
     saveDay(dateStr, day);
   });
   document.querySelectorAll('.meal-edit-btn').forEach(b =>
-    b.addEventListener('click', () => toggleInlineEdit(b.dataset.id)));
+    b.addEventListener('click', () => {
+      const days = loadDays();
+      const day  = getOrCreateDay(dateStr, days);
+      const meal = day.meals.find(m => m.id === b.dataset.id);
+      if (meal) openMealModal(dateStr, meal);
+    }));
+  document.querySelectorAll('.meal-expand-btn').forEach(b =>
+    b.addEventListener('click', () => {
+      const el = document.getElementById(`mitems-${b.dataset.id}`);
+      if (el) { el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+    }));
   document.querySelectorAll('.meal-del-btn').forEach(b =>
     b.addEventListener('click', () => deleteMeal(b.dataset.id)));
   document.querySelectorAll('[data-status]').forEach(btn =>
@@ -332,74 +379,232 @@ function renderToday() {
 }
 
 function mealRowHTML(m) {
+  const { cal, protein } = itemTotals(m);
+  const name = m.name || resolveMealName(m);
+  const hasItems = m.items && m.items.length > 1;
   return `
     <div class="meal-row" id="mrow-${m.id}">
-      <div>
-        <div class="meal-name">${escHtml(m.name || 'Unnamed')}</div>
-        <div class="meal-macros">${m.protein}g protein · ${m.cal} kcal</div>
+      <div class="meal-info-wrap">
+        <div class="meal-name">${escHtml(name)}</div>
+        <div class="meal-macros">${protein}g protein · ${cal} kcal</div>
       </div>
       <div class="meal-actions">
+        ${hasItems ? `<button class="btn-icon meal-expand-btn" data-id="${m.id}" title="Details">▾</button>` : ''}
         <button class="btn-icon meal-edit-btn" data-id="${m.id}" title="Edit">✎</button>
         <button class="btn-icon danger meal-del-btn" data-id="${m.id}" title="Delete">✕</button>
       </div>
     </div>
-    <div class="inline-edit-form" id="iedit-${m.id}" style="display:none"></div>`;
+    ${hasItems ? `
+    <div class="meal-items-detail" id="mitems-${m.id}" style="display:none">
+      ${m.items.map(it => `
+        <div class="meal-item-row">
+          <span>${escHtml(it.name || '–')}${it.qty ? ` <span class="qty-tag">${it.qty}${it.unit || 'g'}</span>` : ''}</span>
+          <span class="muted">${it.protein}g · ${it.cal} kcal</span>
+        </div>`).join('')}
+    </div>` : ''}`;
 }
 
-function toggleAddMealForm() {
-  const c = document.getElementById('add-meal-form');
-  if (c.innerHTML) { c.innerHTML = ''; return; }
-  c.innerHTML = mealFormHTML(null);
-  c.querySelector('.meal-save').addEventListener('click', () => saveMeal(null, c));
-  c.querySelector('.meal-cancel').addEventListener('click', () => { c.innerHTML = ''; });
-}
+function openMealModal(dateStr, existingMeal = null) {
+  let mealName = existingMeal?.name || '';
+  let items = existingMeal
+    ? (existingMeal.items
+        ? existingMeal.items.map(i => ({ ...i }))
+        : [legacyToSingleItem(existingMeal)])
+    : [];
+  let addMode = null; // null | 'library' | 'manual'
+  let selectedFood = null;
+  let searchQuery = '';
 
-function toggleInlineEdit(id) {
-  const container = document.getElementById(`iedit-${id}`);
-  if (!container) return;
-  if (container.style.display !== 'none' && container.innerHTML) {
-    container.style.display = 'none';
-    container.innerHTML = '';
-    return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  function render() {
+    let modal = overlay.querySelector('.modal');
+    if (!modal) { modal = document.createElement('div'); modal.className = 'modal'; overlay.appendChild(modal); }
+
+    modal.innerHTML = `
+      <h2>${existingMeal ? 'Edit meal' : 'Add meal'}</h2>
+      <input class="input" id="mm-name" type="text" placeholder="Name (optional)" value="${escHtml(mealName)}">
+
+      <div class="mm-items">
+        ${items.length === 0
+          ? '<p class="muted" style="margin:6px 0">No items yet.</p>'
+          : items.map((it, i) => `
+            <div class="mm-item-row">
+              <div>
+                <span class="mm-item-name">${escHtml(it.name || '–')}</span>
+                ${it.qty ? `<span class="qty-tag">${it.qty}${it.unit || 'g'}</span>` : ''}
+                <div class="muted" style="font-size:12px">${it.protein}g protein · ${it.cal} kcal</div>
+              </div>
+              <button class="btn-icon danger mm-remove" data-idx="${i}">✕</button>
+            </div>`).join('')}
+      </div>
+
+      ${addMode === null ? `
+        <div class="mm-add-btns">
+          <button class="btn-secondary" id="mm-lib">From library</button>
+          <button class="btn-secondary" id="mm-manual">Enter manually</button>
+        </div>` : ''}
+
+      ${addMode === 'library' ? libraryPickerHTML() : ''}
+      ${addMode === 'manual'  ? manualItemHTML()    : ''}
+
+      <div class="form-actions" style="margin-top:14px">
+        <button class="btn-secondary" id="mm-cancel">Cancel</button>
+        <button class="btn-primary" id="mm-save" ${items.length === 0 ? 'disabled' : ''}>Save meal</button>
+      </div>`;
+
+    wireModal(modal);
   }
-  // Close any other open inline edits
-  document.querySelectorAll('[id^="iedit-"]').forEach(el => {
-    el.style.display = 'none';
-    el.innerHTML = '';
-  });
 
-  const days = loadDays();
-  const day = getOrCreateDay(todayStr(), days);
-  const meal = day.meals.find(m => m.id === id);
-  if (!meal) return;
-
-  container.innerHTML = mealFormHTML(meal);
-  container.style.display = 'block';
-  container.querySelector('.meal-save').addEventListener('click', () => saveMeal(id, container));
-  container.querySelector('.meal-cancel').addEventListener('click', () => {
-    container.style.display = 'none';
-    container.innerHTML = '';
-  });
-}
-
-function saveMeal(id, container) {
-  const name = container.querySelector('[data-field="name"]').value.trim() || 'Unnamed';
-  const cal = parseFloat(container.querySelector('[data-field="cal"]').value) || 0;
-  const protein = parseFloat(container.querySelector('[data-field="protein"]').value) || 0;
-
-  const dateStr = selectedDate;
-  const days = loadDays();
-  const day = getOrCreateDay(dateStr, days);
-
-  if (id) {
-    const i = day.meals.findIndex(m => m.id === id);
-    if (i >= 0) day.meals[i] = { ...day.meals[i], name, cal, protein };
-  } else {
-    day.meals.push({ id: uid(), name, cal, protein, ts: Date.now() });
+  function libraryPickerHTML() {
+    const foods = loadFoods();
+    const filtered = foods.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    return `
+      <div class="mm-section">
+        <input class="input" id="mm-search" type="text" placeholder="Search foods…" value="${escHtml(searchQuery)}" autocomplete="off">
+        <div class="mm-food-list">
+          ${filtered.length === 0
+            ? '<p class="muted">No foods. Add some in Settings → Food library.</p>'
+            : filtered.map(f => `
+              <div class="mm-food-row ${selectedFood?.id === f.id ? 'mm-food-selected' : ''}" data-food-id="${f.id}">
+                <span>${escHtml(f.name)}</span>
+                <span class="muted">${f.type === 'serving' ? 'per serving' : 'per 100g'}</span>
+              </div>
+              ${selectedFood?.id === f.id ? qtyInputHTML(f) : ''}`).join('')}
+        </div>
+        <button class="btn-link mm-back" style="margin-top:8px">← Back</button>
+      </div>`;
   }
 
-  saveDay(dateStr, day);
-  renderToday();
+  function qtyInputHTML(food) {
+    const unitStr = food.type === 'serving' ? 'serving(s)' : 'g';
+    const defQty  = food.serving_g && food.type === 'weight' ? food.serving_g : '';
+    return `
+      <div class="mm-qty-form">
+        <div class="qty-row">
+          <input class="input" id="mm-qty" type="number" placeholder="Qty" value="${defQty}" step="any" min="0" inputmode="decimal">
+          <span class="qty-unit-label">${unitStr}</span>
+        </div>
+        <div class="mm-preview" id="mm-preview"></div>
+        <button class="btn-primary" id="mm-add-lib">Add item</button>
+      </div>`;
+  }
+
+  function manualItemHTML() {
+    return `
+      <div class="mm-section">
+        <input class="input" id="mm-m-name" type="text" placeholder="Item name (optional)">
+        <div class="form-row">
+          <input class="input" type="number" id="mm-m-cal"  placeholder="Calories" min="0" inputmode="decimal">
+          <input class="input" type="number" id="mm-m-prot" placeholder="Protein (g)" min="0" step="0.1" inputmode="decimal">
+        </div>
+        <div class="form-actions">
+          <button class="btn-link mm-back">← Back</button>
+          <button class="btn-primary" id="mm-add-manual">Add item</button>
+        </div>
+      </div>`;
+  }
+
+  function wireModal(modal) {
+    modal.querySelector('#mm-name')?.addEventListener('input', e => { mealName = e.target.value; });
+    modal.querySelector('#mm-cancel')?.addEventListener('click', () => overlay.remove());
+    modal.querySelector('#mm-save')?.addEventListener('click', saveMealFromModal);
+    modal.querySelectorAll('.mm-remove').forEach(btn =>
+      btn.addEventListener('click', () => { items.splice(+btn.dataset.idx, 1); render(); }));
+
+    // Mode switches
+    modal.querySelector('#mm-lib')?.addEventListener('click', () => { addMode = 'library'; render(); });
+    modal.querySelector('#mm-manual')?.addEventListener('click', () => { addMode = 'manual'; render(); });
+    modal.querySelectorAll('.mm-back').forEach(b => b.addEventListener('click', () => {
+      addMode = null; selectedFood = null; render();
+    }));
+
+    // Library search (partial re-render to avoid closing keyboard)
+    modal.querySelector('#mm-search')?.addEventListener('input', e => {
+      searchQuery = e.target.value;
+      const list = modal.querySelector('.mm-food-list');
+      if (!list) return;
+      const foods = loadFoods();
+      const filtered = foods.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
+      list.innerHTML = filtered.length === 0
+        ? '<p class="muted">No foods. Add some in Settings → Food library.</p>'
+        : filtered.map(f => `
+          <div class="mm-food-row ${selectedFood?.id === f.id ? 'mm-food-selected' : ''}" data-food-id="${f.id}">
+            <span>${escHtml(f.name)}</span>
+            <span class="muted">${f.type === 'serving' ? 'per serving' : 'per 100g'}</span>
+          </div>
+          ${selectedFood?.id === f.id ? qtyInputHTML(f) : ''}`).join('');
+      wireFoodRows(modal);
+      wireQtyInput(modal);
+    });
+
+    wireFoodRows(modal);
+    wireQtyInput(modal);
+
+    // Manual add
+    modal.querySelector('#mm-add-manual')?.addEventListener('click', () => {
+      const name    = modal.querySelector('#mm-m-name')?.value.trim() || '';
+      const cal     = parseFloat(modal.querySelector('#mm-m-cal')?.value)  || 0;
+      const protein = parseFloat(modal.querySelector('#mm-m-prot')?.value) || 0;
+      items.push({ name, cal, protein });
+      addMode = null;
+      render();
+    });
+  }
+
+  function wireFoodRows(modal) {
+    modal.querySelectorAll('.mm-food-row').forEach(row =>
+      row.addEventListener('click', () => {
+        const food = loadFoods().find(f => f.id === row.dataset.foodId);
+        if (!food) return;
+        selectedFood = selectedFood?.id === food.id ? null : food;
+        render();
+        if (selectedFood) setTimeout(() => modal.querySelector('#mm-qty')?.focus(), 50);
+      }));
+  }
+
+  function wireQtyInput(modal) {
+    modal.querySelector('#mm-qty')?.addEventListener('input', e => {
+      const preview = modal.querySelector('#mm-preview');
+      if (!preview || !selectedFood) return;
+      const m = calcFoodMacros(selectedFood, e.target.value);
+      preview.textContent = m.cal || m.protein ? `→ ${m.cal} kcal · ${m.protein}g protein` : '';
+    });
+    modal.querySelector('#mm-add-lib')?.addEventListener('click', () => {
+      const qty = parseFloat(modal.querySelector('#mm-qty')?.value);
+      if (!qty || !selectedFood) { alert('Enter a quantity.'); return; }
+      const macros = calcFoodMacros(selectedFood, qty);
+      items.push({
+        name: selectedFood.name, foodId: selectedFood.id,
+        qty, unit: selectedFood.type === 'serving' ? 'srv' : 'g',
+        cal: macros.cal, protein: macros.protein,
+      });
+      selectedFood = null; addMode = null; searchQuery = '';
+      render();
+    });
+  }
+
+  function saveMealFromModal() {
+    if (items.length === 0) return;
+    const finalName = mealName.trim() || (items.length === 1 ? (items[0].name || 'Meal') : 'Meal');
+    const meal = { id: existingMeal?.id || uid(), name: finalName, items, ts: existingMeal?.ts || Date.now() };
+    const days = loadDays();
+    const day  = getOrCreateDay(dateStr, days);
+    if (existingMeal) {
+      const idx = day.meals.findIndex(m => m.id === existingMeal.id);
+      if (idx >= 0) day.meals[idx] = meal; else day.meals.push(meal);
+    } else {
+      day.meals.push(meal);
+    }
+    saveDay(dateStr, day);
+    overlay.remove();
+    renderToday();
+  }
+
+  render();
 }
 
 function deleteMeal(id) {
@@ -661,6 +866,31 @@ function svgLine(points, refPoints = null) {
 
 // ── SETTINGS TAB ──────────────────────────────────────────────────────────────
 
+function foodLibraryHTML() {
+  const foods = loadFoods();
+  return `
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Food library</span>
+        <button class="btn-add" id="btn-add-food">+ Add</button>
+      </div>
+      ${foods.length === 0 ? '<p class="muted">No foods yet.</p>' : foods.map(f => `
+        <div class="food-row">
+          <div>
+            <span class="food-name">${escHtml(f.name)}</span>
+            <div class="muted" style="font-size:12px">${f.type === 'serving'
+              ? `${f.cal} kcal · ${f.protein}g protein per serving`
+              : `${f.cal} kcal · ${f.protein}g protein per 100g`}
+            </div>
+          </div>
+          <div class="meal-actions">
+            <button class="btn-icon food-edit-btn" data-id="${f.id}">✎</button>
+            <button class="btn-icon danger food-del-btn" data-id="${f.id}">✕</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
 function renderSettings() {
   const s = loadSettings();
   const exampleGoal = (75 * s.protein_multiplier).toFixed(0);
@@ -668,6 +898,7 @@ function renderSettings() {
   document.getElementById('tab-settings').innerHTML = `
     <div class="tab-header"><h1>Settings</h1></div>
     <div class="tab-body">
+      ${foodLibraryHTML()}
       <div class="card">
         <div class="card-title">Protein goal</div>
         <label class="form-label">Multiplier (g per kg bodyweight)</label>
@@ -728,10 +959,107 @@ function renderSettings() {
       navigate('today');
     }
   });
+
+  // Food library events
+  document.getElementById('btn-add-food')?.addEventListener('click', () => openFoodModal());
+  document.querySelectorAll('.food-edit-btn').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const food = loadFoods().find(f => f.id === btn.dataset.id);
+      if (food) openFoodModal(food);
+    }));
+  document.querySelectorAll('.food-del-btn').forEach(btn =>
+    btn.addEventListener('click', () => {
+      if (!confirm('Delete this food?')) return;
+      const foods = loadFoods().filter(f => f.id !== btn.dataset.id);
+      saveFoods(foods);
+      renderSettings();
+    }));
+}
+
+function openFoodModal(existingFood = null) {
+  let type = existingFood?.type || 'weight';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  function render() {
+    let modal = overlay.querySelector('.modal');
+    if (!modal) { modal = document.createElement('div'); modal.className = 'modal'; overlay.appendChild(modal); }
+    modal.innerHTML = `
+      <h2>${existingFood ? 'Edit food' : 'New food'}</h2>
+      <label class="form-label">Name</label>
+      <input class="input" id="f-name" type="text" value="${escHtml(existingFood?.name || '')}" placeholder="e.g. Salmon">
+      <label class="form-label" style="margin-top:10px">Type</label>
+      <div class="toggle-group">
+        <button class="toggle-btn ${type === 'weight'  ? 'active' : ''}" data-type="weight">By weight (per 100g)</button>
+        <button class="toggle-btn ${type === 'serving' ? 'active' : ''}" data-type="serving">By serving</button>
+      </div>
+      ${foodFieldsHTML(type, existingFood)}
+      <p class="muted" style="margin-top:6px">1 oz = 28g · 1 lb = 454g</p>
+      <div class="form-actions" style="margin-top:12px">
+        <button class="btn-secondary" id="f-cancel">Cancel</button>
+        <button class="btn-primary" id="f-save">Save</button>
+      </div>`;
+
+    modal.querySelectorAll('[data-type]').forEach(btn =>
+      btn.addEventListener('click', () => { type = btn.dataset.type; render(); }));
+    modal.querySelector('#f-cancel').addEventListener('click', () => overlay.remove());
+    modal.querySelector('#f-save').addEventListener('click', () => {
+      const name    = modal.querySelector('#f-name').value.trim();
+      const cal     = parseFloat(modal.querySelector('#f-cal').value)     || 0;
+      const protein = parseFloat(modal.querySelector('#f-protein').value) || 0;
+      const serving_g = type === 'weight'
+        ? (parseFloat(modal.querySelector('#f-serving')?.value) || null)
+        : null;
+      if (!name) { alert('Name is required.'); return; }
+      const food = { id: existingFood?.id || uid(), name, type, cal, protein };
+      if (serving_g) food.serving_g = serving_g;
+      const foods = loadFoods();
+      if (existingFood) {
+        const idx = foods.findIndex(f => f.id === existingFood.id);
+        if (idx >= 0) foods[idx] = food; else foods.push(food);
+      } else {
+        foods.push(food);
+      }
+      saveFoods(foods);
+      overlay.remove();
+      renderSettings();
+    });
+  }
+  render();
+}
+
+function foodFieldsHTML(type, food) {
+  if (type === 'serving') return `
+    <div class="form-row" style="margin-top:10px">
+      <div style="flex:1">
+        <label class="form-label">Cal / serving</label>
+        <input class="input" type="number" id="f-cal" value="${food?.cal || ''}" placeholder="180" inputmode="decimal">
+      </div>
+      <div style="flex:1">
+        <label class="form-label">Protein / serving (g)</label>
+        <input class="input" type="number" id="f-protein" value="${food?.protein || ''}" placeholder="21" step="0.1" inputmode="decimal">
+      </div>
+    </div>`;
+  return `
+    <div class="form-row" style="margin-top:10px">
+      <div style="flex:1">
+        <label class="form-label">Cal per 100g</label>
+        <input class="input" type="number" id="f-cal" value="${food?.cal || ''}" placeholder="208" inputmode="decimal">
+      </div>
+      <div style="flex:1">
+        <label class="form-label">Protein per 100g (g)</label>
+        <input class="input" type="number" id="f-protein" value="${food?.protein || ''}" placeholder="20" step="0.1" inputmode="decimal">
+      </div>
+    </div>
+    <label class="form-label" style="margin-top:10px">Default serving size (g) — optional</label>
+    <input class="input" type="number" id="f-serving" value="${food?.serving_g || ''}" placeholder="e.g. 150 for a typical salmon fillet" inputmode="decimal">`;
 }
 
 function exportJSON() {
-  const data = { days: loadDays(), settings: loadSettings(), exported: new Date().toISOString() };
+  const data = { days: loadDays(), settings: loadSettings(), foods: loadFoods(), exported: new Date().toISOString() };
   download(`cut_backup_${todayStr()}.json`, JSON.stringify(data, null, 2), 'application/json');
 }
 
@@ -772,6 +1100,7 @@ function importJSON(e) {
       const data = JSON.parse(ev.target.result);
       if (data.days) saveDays(data.days);
       if (data.settings) saveSettings(data.settings);
+      if (data.foods) saveFoods(data.foods);
       alert('Import successful!');
       navigate(currentTab);
     } catch { alert('Invalid backup file.'); }

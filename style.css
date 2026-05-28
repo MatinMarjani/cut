@@ -324,6 +324,34 @@ input[type=number].input::-webkit-inner-spin-button { -webkit-appearance: none; 
 .chart-svg { width: 100%; height: auto; display: block; margin: 6px 0 2px; }
 .chart-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 
+/* ── MEAL MODAL ── */
+.mm-items { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.mm-item-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.mm-item-row:last-child { border-bottom: none; }
+.mm-item-name { font-size: 14px; }
+.mm-add-btns { display: flex; gap: 8px; margin: 8px 0; }
+.mm-add-btns .btn-secondary { flex: 1; text-align: center; }
+.mm-section { background: var(--card2); border-radius: 10px; padding: 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+.mm-food-list { display: flex; flex-direction: column; max-height: 200px; overflow-y: auto; }
+.mm-food-row { display: flex; justify-content: space-between; padding: 9px 6px; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 6px; }
+.mm-food-row:last-child { border-bottom: none; }
+.mm-food-row:active, .mm-food-selected { background: var(--card); }
+.mm-qty-form { display: flex; flex-direction: column; gap: 8px; padding: 8px; background: var(--card); border-radius: 8px; margin-top: 4px; }
+.qty-row { display: flex; align-items: center; gap: 8px; }
+.qty-row .input { flex: 1; }
+.qty-unit-label { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.mm-preview { font-size: 13px; color: var(--accent); min-height: 18px; }
+
+/* ── MEAL ITEMS DETAIL ── */
+.meal-items-detail { padding: 4px 0 8px 4px; border-bottom: 1px solid var(--border); }
+.meal-item-row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; color: var(--muted); }
+.qty-tag { font-size: 11px; background: var(--card2); border-radius: 4px; padding: 1px 5px; margin-left: 4px; color: var(--muted); }
+
+/* ── FOOD LIBRARY ── */
+.food-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.food-row:last-child { border-bottom: none; }
+.food-name { font-size: 15px; }
+
 /* ── SETTINGS ── */
 .toggle-group { display: flex; gap: 8px; }
 .toggle-btn {
