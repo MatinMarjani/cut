@@ -1,4 +1,4 @@
-const CACHE = 'cut-v4';
+const CACHE = 'cut-v5';
 // Use relative paths so this works on any host (localhost, GitHub Pages, etc.)
 const ASSETS = ['./', './index.html', './app.js', './style.css', './manifest.json'];
 
