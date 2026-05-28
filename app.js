@@ -97,7 +97,8 @@ function calcFoodMacros(food, qty) {
   if (food.type === 'serving') {
     return { cal: Math.round(food.cal * q), protein: +((food.protein * q).toFixed(1)) };
   }
-  return { cal: Math.round(food.cal * q / 100), protein: +((food.protein * q / 100).toFixed(1)) };
+  const per = food.per || 100;
+  return { cal: Math.round(food.cal * q / per), protein: +((food.protein * q / per).toFixed(1)) };
 }
 
 // Per-meal totals — handles both new (items[]) and legacy (flat cal/protein) formats
@@ -471,7 +472,7 @@ function openMealModal(dateStr, existingMeal = null) {
             : filtered.map(f => `
               <div class="mm-food-row ${selectedFood?.id === f.id ? 'mm-food-selected' : ''}" data-food-id="${f.id}">
                 <span>${escHtml(f.name)}</span>
-                <span class="muted">${f.type === 'serving' ? 'per serving' : 'per 100g'}</span>
+                <span class="muted">${f.type === 'serving' ? 'per serving' : `per ${f.per || 100}g`}</span>
               </div>
               ${selectedFood?.id === f.id ? qtyInputHTML(f) : ''}`).join('')}
         </div>
@@ -534,7 +535,7 @@ function openMealModal(dateStr, existingMeal = null) {
         : filtered.map(f => `
           <div class="mm-food-row ${selectedFood?.id === f.id ? 'mm-food-selected' : ''}" data-food-id="${f.id}">
             <span>${escHtml(f.name)}</span>
-            <span class="muted">${f.type === 'serving' ? 'per serving' : 'per 100g'}</span>
+            <span class="muted">${f.type === 'serving' ? 'per serving' : `per ${f.per || 100}g`}</span>
           </div>
           ${selectedFood?.id === f.id ? qtyInputHTML(f) : ''}`).join('');
       wireFoodRows(modal);
@@ -880,7 +881,7 @@ function foodLibraryHTML() {
             <span class="food-name">${escHtml(f.name)}</span>
             <div class="muted" style="font-size:12px">${f.type === 'serving'
               ? `${f.cal} kcal · ${f.protein}g protein per serving`
-              : `${f.cal} kcal · ${f.protein}g protein per 100g`}
+              : `${f.cal} kcal · ${f.protein}g protein per ${f.per || 100}g`}
             </div>
           </div>
           <div class="meal-actions">
@@ -1005,16 +1006,20 @@ function openFoodModal(existingFood = null) {
 
     modal.querySelectorAll('[data-type]').forEach(btn =>
       btn.addEventListener('click', () => { type = btn.dataset.type; render(); }));
+    // Live-update the "per Xg" labels as user types the reference amount
+    modal.querySelector('#f-per')?.addEventListener('input', e => {
+      modal.querySelectorAll('.f-per-label').forEach(el => { el.textContent = e.target.value || '?'; });
+    });
     modal.querySelector('#f-cancel').addEventListener('click', () => overlay.remove());
     modal.querySelector('#f-save').addEventListener('click', () => {
       const name    = modal.querySelector('#f-name').value.trim();
       const cal     = parseFloat(modal.querySelector('#f-cal').value)     || 0;
       const protein = parseFloat(modal.querySelector('#f-protein').value) || 0;
-      const serving_g = type === 'weight'
-        ? (parseFloat(modal.querySelector('#f-serving')?.value) || null)
-        : null;
+      const per       = type === 'weight' ? (parseFloat(modal.querySelector('#f-per')?.value)     || 100) : null;
+      const serving_g = type === 'weight' ? (parseFloat(modal.querySelector('#f-serving')?.value) || null) : null;
       if (!name) { alert('Name is required.'); return; }
       const food = { id: existingFood?.id || uid(), name, type, cal, protein };
+      if (per && per !== 100) food.per = per;
       if (serving_g) food.serving_g = serving_g;
       const foods = loadFoods();
       if (existingFood) {
@@ -1043,19 +1048,22 @@ function foodFieldsHTML(type, food) {
         <input class="input" type="number" id="f-protein" value="${food?.protein || ''}" placeholder="21" step="0.1" inputmode="decimal">
       </div>
     </div>`;
+  const per = food?.per || 100;
   return `
-    <div class="form-row" style="margin-top:10px">
+    <label class="form-label" style="margin-top:10px">Reference amount (g) — whatever the nutrition label uses</label>
+    <input class="input" type="number" id="f-per" value="${per}" placeholder="100" min="1" inputmode="decimal">
+    <div class="form-row" style="margin-top:8px">
       <div style="flex:1">
-        <label class="form-label">Cal per 100g</label>
+        <label class="form-label">Calories per <span class="f-per-label">${per}</span>g</label>
         <input class="input" type="number" id="f-cal" value="${food?.cal || ''}" placeholder="208" inputmode="decimal">
       </div>
       <div style="flex:1">
-        <label class="form-label">Protein per 100g (g)</label>
+        <label class="form-label">Protein per <span class="f-per-label">${per}</span>g</label>
         <input class="input" type="number" id="f-protein" value="${food?.protein || ''}" placeholder="20" step="0.1" inputmode="decimal">
       </div>
     </div>
-    <label class="form-label" style="margin-top:10px">Default serving size (g) — optional</label>
-    <input class="input" type="number" id="f-serving" value="${food?.serving_g || ''}" placeholder="e.g. 150 for a typical salmon fillet" inputmode="decimal">`;
+    <label class="form-label" style="margin-top:10px">Default serving size (g) — optional quick-fill</label>
+    <input class="input" type="number" id="f-serving" value="${food?.serving_g || ''}" placeholder="e.g. 150" inputmode="decimal">`;
 }
 
 function exportJSON() {
